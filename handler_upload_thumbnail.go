@@ -1,10 +1,12 @@
 package main
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -52,34 +54,45 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 
 	// Obtener el tipo de medio del encabezado Content-Type del archivo
 	mediaType := header.Header.Get("Content-Type")
+	extensions, err := mime.ExtensionsByType(mediaType)
+	if err != nil || len(extensions) == 0 {
+		respondWithError(w, http.StatusBadRequest, "Invalid media type", err)
+		return
+	}
+	fileExtension := extensions[0]
 
-	// Leer todos los datos de la imagen en un slice de bytes
-	imageData, err := io.ReadAll(file)
+	// Crear una ruta de archivo única
+	filePath := filepath.Join(cfg.assetsRoot, fmt.Sprintf("%s%s", videoID.String(), fileExtension))
+
+	// Crear el nuevo archivo
+	outFile, err := os.Create(filePath)
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Unable to read file", err)
+		respondWithError(w, http.StatusInternalServerError, "Unable to create file", err)
+		return
+	}
+	defer outFile.Close()
+
+	// Copiar el contenido del multipart.File al nuevo archivo en el disco
+	_, err = io.Copy(outFile, file)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to save file", err)
 		return
 	}
 
-	// Convertir los datos de la imagen a una cadena base64
-	base64Data := base64.StdEncoding.EncodeToString(imageData)
-	// Crear una URL de datos con el tipo de medio y los datos codificados en base64
-	dataURL := fmt.Sprintf("data:%s;base64,%s", mediaType, base64Data)
-
-	// Obtener los metadatos del video de la base de datos SQLite
+	// Actualizar la base de datos con la nueva URL de la miniatura
+	thumbnailURL := fmt.Sprintf("http://localhost:%s/assets/%s%s", cfg.port, videoID.String(), fileExtension)
 	video, err := cfg.db.GetVideo(videoID)
 	if err != nil {
 		respondWithError(w, http.StatusNotFound, "Video not found", err)
 		return
 	}
 
-	// Verificar si el usuario autenticado es el propietario del video
 	if video.UserID != userID {
 		respondWithError(w, http.StatusUnauthorized, "Unauthorized", nil)
 		return
 	}
 
-	// Actualizar la base de datos con la nueva URL de la miniatura
-	video.ThumbnailURL = &dataURL
+	video.ThumbnailURL = &thumbnailURL
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Unable to update video", err)
