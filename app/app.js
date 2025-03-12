@@ -261,7 +261,10 @@ function viewVideo(video) {
     thumbnailImg.style.display = 'none';
   } else {
     thumbnailImg.style.display = 'block';
-    thumbnailImg.src = video.thumbnail_url;
+    // Añadir cache busting a la URL de la miniatura
+    const originalUrl = video.thumbnail_url;
+    const cacheBustedUrl = `${originalUrl}?v=${Date.now()}`;
+    thumbnailImg.src = cacheBustedUrl;
   }
 
   const videoPlayer = document.getElementById('video-player');
