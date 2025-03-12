@@ -103,8 +103,16 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Obtener la relación de aspecto del archivo de video
-	aspectRatio, err := getVideoAspectRatio(tempFile.Name())
+	// Procesar el video para fast start encoding
+	processedFilePath, err := processVideoForFastStart(tempFile.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to process video for fast start", err)
+		return
+	}
+	defer os.Remove(processedFilePath)
+
+	// Obtener la relación de aspecto del archivo de video procesado
+	aspectRatio, err := getVideoAspectRatio(processedFilePath)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Unable to get video aspect ratio", err)
 		return
@@ -133,11 +141,18 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	// Crear la clave del archivo con el prefijo
 	fileKey := filepath.Join(prefix, randomFileName)
 
-	// Subir el objeto a S3 usando PutObject
+	// Subir el objeto a S3 usando PutObject con el archivo procesado
+	processedFile, err := os.Open(processedFilePath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to open processed file", err)
+		return
+	}
+	defer processedFile.Close()
+
 	_, err = cfg.s3Client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket:      &cfg.s3Bucket,
 		Key:         &fileKey,
-		Body:        tempFile,
+		Body:        processedFile,
 		ContentType: &mediaType,
 	})
 	if err != nil {
@@ -145,7 +160,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Actualizar la VideoURL del registro del video en la base de datos
+	// Actualizar la VideoURL del registro del video en la base de datos con la URL del archivo procesado en S3
 	videoURL := fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", cfg.s3Bucket, cfg.s3Region, fileKey)
 	video.VideoURL = &videoURL
 	err = cfg.db.UpdateVideo(video)
@@ -187,4 +202,15 @@ func getVideoAspectRatio(filePath string) (string, error) {
 	} else {
 		return "other", nil
 	}
+}
+
+func processVideoForFastStart(filePath string) (string, error) {
+	outputFilePath := filePath + ".processing"
+	cmd := exec.Command("ffmpeg", "-i", filePath, "-c", "copy", "-movflags", "faststart", "-f", "mp4", outputFilePath)
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("failed to run ffmpeg: %w", err)
+	}
+
+	return outputFilePath, nil
 }
