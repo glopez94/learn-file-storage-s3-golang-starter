@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"mime"
@@ -72,8 +74,17 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 	fileExtension := extensions[0]
 
+	// Generar un nombre de archivo aleatorio
+	randomBytes := make([]byte, 32)
+	_, err = rand.Read(randomBytes)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to generate random bytes", err)
+		return
+	}
+	randomFileName := base64.RawURLEncoding.EncodeToString(randomBytes) + fileExtension
+
 	// Crear una ruta de archivo única
-	filePath := filepath.Join(cfg.assetsRoot, fmt.Sprintf("%s%s", videoID.String(), fileExtension))
+	filePath := filepath.Join(cfg.assetsRoot, randomFileName)
 
 	// Crear el nuevo archivo
 	outFile, err := os.Create(filePath)
@@ -91,7 +102,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Actualizar la base de datos con la nueva URL de la miniatura
-	thumbnailURL := fmt.Sprintf("http://localhost:%s/assets/%s%s", cfg.port, videoID.String(), fileExtension)
+	thumbnailURL := fmt.Sprintf("http://localhost:%s/assets/%s", cfg.port, randomFileName)
 	video, err := cfg.db.GetVideo(videoID)
 	if err != nil {
 		respondWithError(w, http.StatusNotFound, "Video not found", err)
