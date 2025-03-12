@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
@@ -31,7 +32,6 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 
 	fmt.Println("uploading thumbnail for video", videoID, "by user", userID)
 
-	// TODO: implement the upload here
 	// Configurar el límite de memoria
 	const maxMemory = 10 << 20 // 10MB
 
@@ -60,6 +60,11 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Convertir los datos de la imagen a una cadena base64
+	base64Data := base64.StdEncoding.EncodeToString(imageData)
+	// Crear una URL de datos con el tipo de medio y los datos codificados en base64
+	dataURL := fmt.Sprintf("data:%s;base64,%s", mediaType, base64Data)
+
 	// Obtener los metadatos del video de la base de datos SQLite
 	video, err := cfg.db.GetVideo(videoID)
 	if err != nil {
@@ -73,16 +78,8 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	// Guardar la miniatura en el mapa global
-	thumbnail := thumbnail{
-		data:      imageData,
-		mediaType: mediaType,
-	}
-	videoThumbnails[videoID] = thumbnail
-
 	// Actualizar la base de datos con la nueva URL de la miniatura
-	thumbnailURL := fmt.Sprintf("http://localhost:%s/api/thumbnails/%s", cfg.port, videoID.String())
-	video.ThumbnailURL = &thumbnailURL
+	video.ThumbnailURL = &dataURL
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Unable to update video", err)
